@@ -7,73 +7,22 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <stdlib.h>
+#include <assert.h>
+#include <string.h>
+#include <fcntl.h>
 
-/*
-This program does the following.
-1) Create handlers for two signals.
-2) Create an idle process which will be executed when there is nothing
-   else to do.
-3) Create a send_signals process that sends a SIGALRM every so often
+#define READ_END 0
+#define WRITE_END 1
 
-When run, it should produce the following output (approximately):
+#define NUM_CHILDREN 3
+#define NUM_PIPES NUM_CHILDREN*2
 
-$ ./a.out
-in CPU.cc at 247 main pid = 26428
-state:    1
-name:     IDLE
-pid:      26430
-ppid:     0
-slices:   0
-switches: 0
-started:  0
-in CPU.cc at 100 at beginning of send_signals getpid () = 26429
-in CPU.cc at 216 idle getpid () = 26430
-in CPU.cc at 222 going to sleep
-in CPU.cc at 106 sending signal = 14
-in CPU.cc at 107 to pid = 26428
-in CPU.cc at 148 stopped running->pid = 26430
-in CPU.cc at 155 continuing tocont->pid = 26430
-in CPU.cc at 106 sending signal = 14
-in CPU.cc at 107 to pid = 26428
-in CPU.cc at 148 stopped running->pid = 26430
-in CPU.cc at 155 continuing tocont->pid = 26430
-in CPU.cc at 106 sending signal = 14
-in CPU.cc at 107 to pid = 26428
-in CPU.cc at 115 at end of send_signals
-Terminated
----------------------------------------------------------------------------
-Add the following functionality.
-1) Change the NUM_SECONDS to 20.
-
-2) Take any number of arguments for executables, and place each on new_list.
-    The executable will not require arguments themselves.
-
-3) When a SIGALRM arrives, scheduler() will be called. It calls
-    choose_process which currently always returns the idle process. Do the
-    following.
-    a) Update the PCB for the process that was interrupted including the
-        number of context switches and interrupts it had, and changing its
-        state from RUNNING to READY.
-    b) If there are any processes on the new_list, do the following.
-        i) Take the one off the new_list and put it on the processes list.
-        ii) Change its state to RUNNING, and fork() and execl() it.
-    c) Modify choose_process to round robin the processes in the processes
-        queue that are READY. If no process is READY in the queue, execute
-        the idle process.
-
-4) When a SIGCHLD arrives notifying that a child has exited, process_done() is
-    called. process_done() currently only prints out the PID and the status.
-    a) Add the printing of the information in the PCB including the number
-        of times it was interrupted, the number of times it was context
-        switched (this may be fewer than the interrupts if a process
-        becomes the only non-idle process in the ready queue), and the total
-        system time the process took.
-    b) Change the state to TERMINATED.
-    c) Start the idle process to use the rest of the time slice.
-*/
+#define P2K i
+#define K2P i+1
 
 //changed seconds to 20 (1)
-#define NUM_SECONDS 30
+#define NUM_SECONDS 20
 
 // make sure the asserts work
 #undef NDEBUG
@@ -98,6 +47,8 @@ using namespace std;
 
 enum STATE { NEW, RUNNING, WAITING, READY, TERMINATED };
 
+int pipes[NUM_PIPES][2];
+int p_count = 0;
 /*
 ** a signal handler for those signals delivered to this process, but
 ** not already handled.
@@ -233,6 +184,13 @@ PCB* choose_process ()
                 perror("Error");
 
             else if(f == 0){
+                close (pipes[P2K][READ_END]);
+                close (pipes[K2P][WRITE_END]);
+
+                // assign fildes 3 and 4 to the pipe ends in the child
+                dup2 (pipes[P2K][WRITE_END], 3);
+                dup2 (pipes[K2P][READ_END], 4);
+
                 execl(path.c_str(), running->name, NULL, (char*)NULL);
             
             }
@@ -254,7 +212,7 @@ PCB* choose_process ()
 		processes.remove(*iter);
 		processes.push_back(running);
 		return running;
-		
+            p_count++;		
 	}
 	
     }
@@ -308,6 +266,34 @@ void process_done (int signum)
     running = idle;
 }
 
+void process_trap (int signum)
+{
+    assert (signum == SIGTRAP);
+    WRITE("---- entering process_trap\n");
+
+    /*
+    ** poll all the pipes as we don't know which process sent the trap, nor
+    ** if more than one has arrived.
+    */
+    for (int i = 0; i < NUM_PIPES; i+=2)
+    {
+        char buf[1024];
+        int num_read = read (pipes[P2K][READ_END], buf, 1023);
+        if (num_read > 0)
+        {
+            buf[num_read] = '\0';
+            WRITE("kernel read: ");
+            WRITE(buf);
+            WRITE("\n");
+
+            // respond
+            const char *message = "from the kernel to the process";
+            write (pipes[K2P][WRITE_END], message, strlen (message));
+        }
+    }
+    WRITE("---- leaving process_trap\n");
+}
+
 /*
 ** stop the running process and index into the ISV to call the ISR
 */
@@ -330,6 +316,7 @@ void boot (int pid)
 {
     ISV[SIGALRM] = scheduler;       create_handler (SIGALRM, ISR);
     ISV[SIGCHLD] = process_done;    create_handler (SIGCHLD, ISR);
+    ISV[SIGTRAP] = process_trap;    create_handler (SIGTRAP, ISR);
 
     // start up clock interrupt
     int ret;
