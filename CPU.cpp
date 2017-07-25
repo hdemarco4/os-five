@@ -74,7 +74,7 @@ struct PCB
     int interrupts;     // number of times interrupted
     int switches;       // may be < interrupts
     int started;        // the time this process started
-    int pipes[2];
+    int pipes[2][2];
 };
 
 /*
@@ -182,8 +182,8 @@ PCB* choose_process ()
         running->name = "empty";
             string path = string("./") +string(running->name);
 
-            assert (pipe (&running->pipes[P2K]) == 0);
-            assert (pipe (&running->pipes[K2P]) == 0);
+            assert (pipe (&running->pipes[P2K][2]) == 0);
+            assert (pipe (&running->pipes[K2P][2]) == 0);
 
             // make the read end of the kernel pipe non-blocking.
             assert (fcntl (running->pipes[P2K][READ_END], F_SETFL,
@@ -396,8 +396,8 @@ int main (int argc, char **argv)
         process->interrupts = 0;
         process->switches = 0;
         process->started = sys_time;
-        process->pipes[K2P] = 0;
-        process->pipes[P2K] = 0;
+        process->pipes[K2P][2];
+        process->pipes[P2K][2];
 
         new_list.push_back (process);
         nn--;
