@@ -15,7 +15,10 @@
 #define READ_END 0
 #define WRITE_END 1
 
-#define NUM_CHILDREN 3
+#define P2K i
+#define K2P i+1
+
+#define NUM_CHILDREN j
 #define NUM_PIPES NUM_CHILDREN*2
 
 #define WRITE(a) { const char *foo = a; write (1, foo, strlen (foo)); }
@@ -46,9 +49,7 @@ using namespace std;
 
 enum STATE { NEW, RUNNING, WAITING, READY, TERMINATED };
 
-int P2K = 0;
-int K2P = 1;
-int p_count = 0;
+int child_count = 0;
 /*
 ** a signal handler for those signals delivered to this process, but
 ** not already handled.
@@ -74,7 +75,7 @@ struct PCB
     int interrupts;     // number of times interrupted
     int switches;       // may be < interrupts
     int started;        // the time this process started
-    int pipes[2][2];
+    int pipes[NUM_PIPES][2];
 };
 
 /*
@@ -163,6 +164,38 @@ struct sigaction *create_handler (int signum, void (*handler)(int))
     return (action);
 }
 
+int eye2eh (int i, char *buf, int bufsize, int base)
+{
+    if (bufsize < 1) return (-1);
+    buf[bufsize-1] = '\0';
+    if (bufsize == 1) return (0);
+    if (base < 2 || base > 16)
+    {
+        for (int j = bufsize-2; j >= 0; j--)
+        {
+            buf[j] = ' ';
+        }
+        return (-1);
+    }
+
+    int count = 0;
+    const char *digits = "0123456789ABCDEF";
+    for (int j = bufsize-2; j >= 0; j--)
+    {
+        if (i == 0)
+        {
+            buf[j] = ' ';
+        }
+        else
+        {
+            buf[j] = digits[i%base];
+            i = i/base;
+            count++;
+        }
+    }
+    if (i != 0) return (-1);
+    return (count);
+}
 
 PCB* choose_process ()
 {
@@ -182,17 +215,12 @@ PCB* choose_process ()
         running->name = "empty";
             string path = string("./") +string(running->name);
 
-            assert (pipe (&running->pipes[P2K][2]) == 0);
-            assert (pipe (&running->pipes[K2P][2]) == 0);
-
-            // make the read end of the kernel pipe non-blocking.
-            assert (fcntl (running->pipes[P2K][READ_END], F_SETFL,
-               fcntl(running->pipes[P2K][READ_END], F_GETFL) | O_NONBLOCK) == 0);
-
             if((f = fork()) < 0)
                 perror("Error");
 
             else if(f == 0){
+              for(int i = 0; i < NUM_PIPES; i+=2){
+               for(int j = 0; j < NUM_PIPES; j+=1){
                 close (running->pipes[P2K][READ_END]);
                 close (running->pipes[K2P][WRITE_END]);
 
@@ -201,7 +229,8 @@ PCB* choose_process ()
                 dup2 (running->pipes[K2P][READ_END], 4);
 
                 execl(path.c_str(), running->name, NULL, (char*)NULL);
-            
+               }
+              }
             }
             else{
                 running->pid = f;
@@ -221,7 +250,7 @@ PCB* choose_process ()
 		processes.remove(*iter);
 		processes.push_back(running);
 		return running;
-            p_count++;		
+            		
 	}
 	
     }
@@ -247,7 +276,46 @@ void scheduler (int signum)
 
 void process_done (int signum)
 {
-    cout << running;
+    assert (signum == SIGCHLD);
+    WRITE("---- entering child_done\n");
+
+    for (;;)
+    {
+        int status, cpid;
+        cpid = waitpid (-1, &status, WNOHANG);
+        cout << running;
+
+        if (cpid < 0)
+        {
+            WRITE("cpid < 0\n");
+            kill (0, SIGTERM);
+        }
+        else if (cpid == 0)
+        {
+            WRITE("cpid == 0\n");
+            break;
+        }
+        else
+        {
+            dprint (WEXITSTATUS (status));
+            char buf[10];
+            assert (eye2eh (cpid, buf, 10, 10) != -1);
+            WRITE("process exited:");
+            WRITE(buf);
+            WRITE("\n");
+            child_count++;
+            if (child_count == NUM_CHILDREN)
+            {
+                kill (0, SIGTERM);
+            }
+        }
+      running->state = TERMINATED;
+      running = idle;
+    }
+
+    WRITE("---- leaving child_done\n");
+
+/*    cout << running;
     assert (signum == SIGCHLD);
 
     int status, cpid;
@@ -273,6 +341,7 @@ void process_done (int signum)
     }
 
     running = idle;
+*/
 }
 
 void process_trap (int signum)
@@ -295,9 +364,10 @@ void process_trap (int signum)
             WRITE(buf);
             WRITE("\n");
 
+const char *tochar = to_string(sys_time).c_str();
             // respond
-            const char *message = "from the kernel to the process";
-            write (running->pipes[K2P][WRITE_END], message, strlen (message));
+ //           const char *message = "from the kernel to the process";
+            write (running->pipes[K2P][WRITE_END], tochar, strlen (tochar));
         }
     }
     WRITE("---- leaving process_trap\n");
@@ -396,8 +466,17 @@ int main (int argc, char **argv)
         process->interrupts = 0;
         process->switches = 0;
         process->started = sys_time;
-        process->pipes[K2P][2];
-        process->pipes[P2K][2];
+
+    for(int i = 0; i < NUM_PIPES; i+=2){
+      
+        assert (pipe (process->pipes[P2K]) == 0);
+        assert (pipe (process->pipes[K2P]) == 0);
+
+        // make the read end of the kernel pipe non-blocking.
+        assert (fcntl (process->pipes[P2K][READ_END], F_SETFL,
+         fcntl(process->pipes[P2K][READ_END], F_GETFL) | O_NONBLOCK) == 0);
+      
+    }
 
         new_list.push_back (process);
         nn--;
