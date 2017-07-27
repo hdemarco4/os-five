@@ -317,39 +317,13 @@ void process_done (int signum)
 
     WRITE("---- leaving child_done\n");
 
-/*    cout << running;
-    assert (signum == SIGCHLD);
-
-    int status, cpid;
-
-    cpid = waitpid (-1, &status, WNOHANG);
-
-    dprintt ("in process_done", cpid);
-
-    if  (cpid == -1)
-    {
-        perror ("waitpid");
-    }
-    else if (cpid == 0)
-    {
-        if (errno == EINTR) { return; }
-        perror ("no children");
-    }
-    else
-    {
-        dprint (WEXITSTATUS (status));
-
-        running->state = TERMINATED;
-    }
-
-    running = idle;
-*/
 }
 
 void process_trap (int signum)
 {
     assert (signum == SIGTRAP);
     WRITE("---- entering process_trap\n");
+    string names = "";
 
     /*
     ** poll all the pipes as we don't know which process sent the trap, nor
@@ -366,7 +340,13 @@ void process_trap (int signum)
             WRITE(buf);
             WRITE("\n");
 
-string tochar = string("System time: ") + to_string(sys_time);
+    list<PCB *>::iterator iter;
+    for (iter = processes.begin(); iter != processes.end(); iter++)
+    {
+        names = names + ", " +(*iter)->name;
+    }
+
+      string tochar = names + string("\nSystem time: ") + to_string(sys_time);
             // respond
  //           const char *message = "from the kernel to the process";
             write (running->pipes[K2P][WRITE_END], tochar.c_str(), strlen (tochar.c_str()));
