@@ -23,7 +23,7 @@ int main (int argc, char** argv)
     int ppid = getppid();
 
     printf ("writing in pid %d\n", pid);
-    const char *message = "from the process to the kernel";
+    const char *message = "Requesting process list and system time.";
     write (TO_KERNEL, message, strlen (message));
 
     printf ("trapping to %d in pid %d\n", ppid, pid);

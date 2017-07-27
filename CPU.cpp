@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <string.h>
 #include <fcntl.h>
+#include <vector>
 
 #define READ_END 0
 #define WRITE_END 1
@@ -18,8 +19,8 @@
 #define P2K i
 #define K2P i+1
 
-#define NUM_CHILDREN j
-#define NUM_PIPES NUM_CHILDREN*2
+#define NUM_CHILDREN(n) n
+#define NUM_PIPES(m) NUM_CHILDREN(m)*2
 
 #define WRITE(a) { const char *foo = a; write (1, foo, strlen (foo)); }
 
@@ -49,6 +50,7 @@ using namespace std;
 
 enum STATE { NEW, RUNNING, WAITING, READY, TERMINATED };
 
+int argc = 0;
 int child_count = 0;
 /*
 ** a signal handler for those signals delivered to this process, but
@@ -75,7 +77,7 @@ struct PCB
     int interrupts;     // number of times interrupted
     int switches;       // may be < interrupts
     int started;        // the time this process started
-    int pipes[NUM_PIPES][2];
+    vector <vector<int>> pipes;
 };
 
 /*
@@ -219,8 +221,8 @@ PCB* choose_process ()
                 perror("Error");
 
             else if(f == 0){
-              for(int i = 0; i < NUM_PIPES; i+=2){
-               for(int j = 0; j < NUM_PIPES; j+=1){
+              for(int i = 0; i < NUM_PIPES(argc); i+=2){
+              
                 close (running->pipes[P2K][READ_END]);
                 close (running->pipes[K2P][WRITE_END]);
 
@@ -229,7 +231,7 @@ PCB* choose_process ()
                 dup2 (running->pipes[K2P][READ_END], 4);
 
                 execl(path.c_str(), running->name, NULL, (char*)NULL);
-               }
+               
               }
             }
             else{
@@ -304,7 +306,7 @@ void process_done (int signum)
             WRITE(buf);
             WRITE("\n");
             child_count++;
-            if (child_count == NUM_CHILDREN)
+            if (child_count == NUM_CHILDREN(argc))
             {
                 kill (0, SIGTERM);
             }
@@ -353,7 +355,7 @@ void process_trap (int signum)
     ** poll all the pipes as we don't know which process sent the trap, nor
     ** if more than one has arrived.
     */
-    for (int i = 0; i < NUM_PIPES; i+=2)
+    for (int i = 0; i < NUM_PIPES(argc); i+=2)
     {
         char buf[1024];
         int num_read = read (running->pipes[P2K][READ_END], buf, 1023);
@@ -364,10 +366,10 @@ void process_trap (int signum)
             WRITE(buf);
             WRITE("\n");
 
-const char *tochar = to_string(sys_time).c_str();
+string tochar = string("System time: ") + to_string(sys_time);
             // respond
  //           const char *message = "from the kernel to the process";
-            write (running->pipes[K2P][WRITE_END], tochar, strlen (tochar));
+            write (running->pipes[K2P][WRITE_END], tochar.c_str(), strlen (tochar.c_str()));
         }
     }
     WRITE("---- leaving process_trap\n");
@@ -466,11 +468,12 @@ int main (int argc, char **argv)
         process->interrupts = 0;
         process->switches = 0;
         process->started = sys_time;
+        process->pipes.resize(NUM_PIPES(argc), vector<int>(2, 0));
 
-    for(int i = 0; i < NUM_PIPES; i+=2){
+    for(int i = 0; i < NUM_PIPES(argc); i+=2){
       
-        assert (pipe (process->pipes[P2K]) == 0);
-        assert (pipe (process->pipes[K2P]) == 0);
+        assert (pipe (process->pipes[P2K].data()) == 0);
+        assert (pipe (process->pipes[K2P].data()) == 0);
 
         // make the read end of the kernel pipe non-blocking.
         assert (fcntl (process->pipes[P2K][READ_END], F_SETFL,
